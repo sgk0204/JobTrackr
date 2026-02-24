@@ -1,0 +1,665 @@
+
+🚀 JobTrackr
+AI-Powered Job Search Portal
+Complete AI Prompt Guide
+From Development to Deployment
+
+Tech Stack  |  FastAPI  •  React.js  •  Supabase  •  Gemini AI  •  SerpAPI
+All Free Tier  •  Personal Project Edition
+
+─────────────────────────────────────────
+Use with Claude AI • Cursor • ChatGPT • Gemini
+
+📖  How to Use This Guide
+Start EVERY new chat session with the Master Prompt first, then paste the specific phase prompt. Each prompt builds on the previous one.
+
+Recommended AI tools: Claude (claude.ai), Cursor IDE, ChatGPT-4o, or Gemini Advanced.
+
+Quick Start Steps
+Create free accounts: Supabase, SerpAPI, Upstash, Render, Vercel, Google Cloud
+Open your preferred AI coding assistant (Claude recommended)
+Paste the Master Prompt → confirm AI understood the spec
+Work through Phase 1 → Phase 7 in order
+Use Debugging Prompts when you hit errors
+Use Bonus Prompts to add extra features
+
+🏆  MASTER PROMPT  (Paste First in Every Session)
+This is the most important prompt. Always paste this FIRST before any other prompt in a new chat session.
+
+  MASTER PROMPT — PROJECT SPECIFICATION
+I am building a full-stack Job Search Web Application. Here is the complete spec:
+ 
+PROJECT NAME: JobTrackr - AI-Powered Job Search Portal
+ 
+TECH STACK:
+- Frontend: React.js + Tailwind CSS (deploy on Vercel)
+- Backend: FastAPI Python (deploy on Render.com)
+- Database: Supabase (PostgreSQL)
+- Cache: Upstash Redis
+- AI Agent: Google Gemini API (gemini-1.5-flash)
+- Job Data: SerpAPI (Google Jobs engine)
+- Auth: Supabase Auth (Google OAuth + Email/Password)
+- All services must use FREE TIER only
+ 
+CORE FEATURES:
+1. User signup/login via Google OAuth and Email+Password
+2. Search jobs by Role + Years of Experience (last 24hr jobs from India)
+3. AI agent (Gemini) ranks jobs by relevance and gives match score 0-100
+4. Apply to jobs and track status: applied, inprocess, rejected, hired
+5. Save jobs for later
+6. Kanban board view of applied jobs by status
+7. Redis caching (6 hours) to save SerpAPI quota
+ 
+DATABASE TABLES:
+- users (id, email, name, password_hash, google_id, avatar_url, created_at)
+- jobs (id, external_id, title, company, location, experience_min,
+        experience_max, description, source, apply_url, salary_range,
+        skills, posted_at, fetched_at)
+- applied_jobs (id, user_id, job_id, status, applied_at, notes, updated_at)
+- saved_jobs (id, user_id, job_id, saved_at)
+ 
+Remember this full spec. Confirm you understand before I give individual tasks.
+
+
+🗄️  PHASE 1 — Database Setup
+Prompt 1.1 — Supabase SQL Schema
+  DATABASE SCHEMA
+Using the JobTrackr spec above, write the complete SQL schema for Supabase.
+ 
+Requirements:
+- All 4 tables: users, jobs, applied_jobs, saved_jobs
+- Use UUID primary keys with gen_random_uuid()
+- Add foreign key constraints with ON DELETE CASCADE
+- Add indexes on: user_id, job_id, status, posted_at, external_id
+- Unique constraint on (user_id, job_id) for applied_jobs and saved_jobs
+- CHECK constraint on applied_jobs.status:
+  only allow: applied, inprocess, rejected, hired
+- Add created_at and updated_at timestamps with defaults
+- Write as single SQL file I can paste into Supabase SQL Editor
+
+Prompt 1.2 — Database Connection File
+  DATABASE CONNECTION
+Write the database.py file for FastAPI using asyncpg to connect to Supabase.
+ 
+Requirements:
+- Use asyncpg connection pool (min 2, max 10 connections)
+- Read DATABASE_URL from environment variable
+- Create get_db() dependency function for FastAPI route injection
+- Add on_startup and on_shutdown event handlers for pool lifecycle
+- Handle connection errors gracefully with proper logging
+- Include a health check function test_connection()
+
+
+🔐  PHASE 2 — Authentication
+Prompt 2.1 — JWT Handler
+  JWT AUTHENTICATION HANDLER
+Write jwt_handler.py for FastAPI authentication.
+ 
+Requirements:
+- Use python-jose library with HS256 algorithm
+- JWT_SECRET and JWT_EXPIRY_HOURS from environment variables
+- Functions needed:
+  1. create_access_token(user_id, email) → returns JWT string
+  2. verify_token(token) → returns decoded payload or raises 401
+  3. get_current_user(token: HTTPBearer) → FastAPI dependency
+     that returns user dict
+- Token payload must include: user_id, email, exp, iat
+- Raise HTTPException(401) with clear messages for expired/invalid tokens
+
+Prompt 2.2 — Email & Password Auth Routes
+  EMAIL/PASSWORD AUTH ROUTES
+Write the auth router (auth/router.py) for email and password authentication.
+ 
+Endpoints needed:
+ 
+1. POST /auth/signup
+   - Body: {email, password, name}
+   - Hash password using bcrypt (passlib)
+   - Check if email already exists → return 400 if yes
+   - Insert into users table
+   - Return: {access_token, user: {id, email, name, avatar_url}}
+ 
+2. POST /auth/login
+   - Body: {email, password}
+   - Find user by email, verify password hash
+   - Return: {access_token, user: {id, email, name, avatar_url}}
+ 
+3. GET /auth/me
+   - Protected route (requires Bearer token)
+   - Return current user details from DB
+ 
+Use asyncpg for DB queries. Include proper error handling.
+
+Prompt 2.3 — Google OAuth
+  GOOGLE OAUTH LOGIN
+Write Google OAuth login for FastAPI.
+ 
+Requirements:
+- Endpoint: POST /auth/google
+- Body: {google_token: string} (ID token from Google frontend SDK)
+- Use google-auth library to verify token with GOOGLE_CLIENT_ID env variable
+- Extract: email, name, google_id (sub), picture from verified token
+- Logic:
+  1. Check if user exists by google_id → login
+  2. Check if user exists by email → link google_id and login
+  3. Neither → create new user with no password_hash
+- Return: {access_token, user: {id, email, name, avatar_url}}
+ 
+Also write GoogleLoginButton.jsx using @react-oauth/google library
+that sends the credential to this endpoint and stores the JWT token.
+
+
+🕷️  PHASE 3 — Job Scraping
+Prompt 3.1 — SerpAPI Job Scraper
+  SERPAPI JOB SCRAPER SERVICE
+Write the job scraper service (services/scraper.py) using SerpAPI.
+ 
+Requirements:
+- Use httpx AsyncClient for async HTTP calls
+- SERPAPI_KEY from environment variable
+- Main function: async fetch_jobs(role: str, experience: int) → List[dict]
+- SerpAPI params:
+  - engine: google_jobs
+  - q: "{role} {experience} years experience jobs India"
+  - location: India
+  - chips: date_posted:today (last 24 hours)
+  - hl: en, gl: in
+- Parse each result to match our jobs table schema:
+  {external_id, title, company, location, description,
+   source, apply_url, salary_range, posted_at}
+- Extract source platform from job.via field
+  (LinkedIn, Indeed, Glassdoor, etc.)
+- Filter out jobs older than 24 hours
+- Handle API errors gracefully (return empty list on failure)
+- Add retry logic (max 2 retries) with httpx
+
+Prompt 3.2 — Redis Cache Service
+  UPSTASH REDIS CACHE SERVICE
+Write the cache service (services/cache.py) using Upstash Redis.
+ 
+Requirements:
+- Use redis.asyncio library
+- UPSTASH_REDIS_URL from environment variable
+- Functions needed:
+  1. async get_cached_jobs(role, experience) → List[dict] or None
+  2. async cache_jobs(role, experience, jobs)
+     → None (TTL: 6 hours = 21600 seconds)
+  3. async get_cached_tips(role, experience) → List[dict] or None
+  4. async cache_tips(role, experience, tips) → None (TTL: 6 hours)
+  5. async clear_cache(role, experience) → None
+- Cache key format: "jobs:{role_lowercase}:{experience}"
+- Serialize/deserialize with json
+- Handle Redis errors silently (return None on any error)
+- Add is_healthy() function that pings Redis
+
+
+🤖  PHASE 4 — Gemini AI Agent
+Prompt 4.1 — AI Job Ranking Agent
+  GEMINI AI RANKING AGENT
+Write the Gemini AI agent (services/gemini.py) for FastAPI.
+ 
+Requirements:
+- Use google-generativeai with model: gemini-1.5-flash (free tier)
+- GEMINI_API_KEY from environment variable
+- Three async functions:
+ 
+1. async rank_jobs(jobs: list, role: str, experience: int) → List[dict]
+   - Take up to 30 jobs, send slim version
+     (id, title, company, description[:200])
+   - Prompt Gemini to score each job 0-100 for relevance
+   - Return jobs sorted by score descending with ai_score and
+     ai_reason fields added
+   - Parse JSON response safely with try/except fallback
+ 
+2. async get_search_tips(role: str, experience: int) → List[dict]
+   - Return 3 job search tips for this role/experience in India
+   - Format: [{tip: string, icon: emoji}]
+ 
+3. async generate_cover_letter(job: dict, user_name: str) → str
+   - Generate a short personalized cover letter (3 paragraphs)
+ 
+- Keep prompts concise to stay within free token limits
+- Add 2 second delay between calls to avoid rate limiting
+
+Prompt 4.2 — AI Search Query Optimizer
+  GEMINI SEARCH QUERY OPTIMIZER
+Add a 4th function to gemini.py:
+ 
+async def optimize_search_queries(role: str, experience: int) → List[str]
+ 
+Requirements:
+- Ask Gemini to generate 5 optimized search query variations for SerpAPI
+- Consider role synonyms, related titles, seniority based on experience
+- Examples for "React Developer" with 3 years:
+  ["React.js Developer", "Frontend Engineer React",
+   "React Redux Developer", "UI Developer React",
+   "Senior React Developer"]
+- Return as plain list of strings
+ 
+Also update fetch_jobs() in scraper.py to:
+- Accept a list of queries
+- Run them in parallel using asyncio.gather()
+- Deduplicate results by external_id
+- Return merged unique job list
+
+
+🛣️  PHASE 5 — API Routes
+Prompt 5.1 — Complete Jobs Router
+  JOBS API ROUTER
+Write the complete jobs router (routes/jobs.py) for FastAPI.
+ 
+Endpoints:
+ 
+1. GET /jobs/search?role=&experience=
+   - Protected route
+   - Check Redis cache first → return if found
+   - Optimize queries with Gemini
+   - Fetch from SerpAPI
+   - Save new jobs to DB (upsert by external_id)
+   - AI rank results with Gemini
+   - Cache results for 6 hours
+   - Return: {jobs, ai_tips, from_cache: bool, total: int}
+ 
+2. POST /jobs/apply/{job_id}
+   - Insert into applied_jobs with status='applied'
+   - Return 400 if already applied
+ 
+3. PATCH /jobs/apply/{job_id}/status
+   - Body: {status: "applied"|"inprocess"|"rejected"|"hired"}
+   - Update status and updated_at
+ 
+4. DELETE /jobs/apply/{job_id}
+   - Remove from applied_jobs → return 204
+ 
+5. POST /jobs/save/{job_id}
+   - Insert into saved_jobs (ignore if already saved)
+ 
+6. DELETE /jobs/save/{job_id}
+   - Remove from saved_jobs
+ 
+7. GET /jobs/my-jobs?filter=all
+   - filter: all/saved/applied/inprocess/rejected/hired
+   - Return jobs with status and applied_at
+   - Include count per status as summary
+ 
+8. GET /jobs/{job_id}
+   - Return job details + whether user applied/saved it
+ 
+All routes: use asyncpg, proper error handling, get_current_user dependency
+
+Prompt 5.2 — FastAPI Main Application
+  FASTAPI MAIN APP (main.py)
+Write the complete main.py for the JobTrackr FastAPI application.
+ 
+Requirements:
+- Include all routers: auth, jobs with prefix /api/v1
+- CORS middleware for FRONTEND_URL env variable
+  (also allow localhost:5173 for development)
+- Startup event: initialize DB pool, test Redis, log status
+- Shutdown event: close DB pool
+- Global exception handler → return 500 with message
+- Health check: GET /health → {status, db, redis, timestamp}
+- Request logging middleware: method, path, status code, duration
+- OpenAPI docs at /docs
+- Read all config from .env using python-dotenv
+
+
+⚛️  PHASE 6 — React Frontend
+Prompt 6.1 — React Project Setup
+  REACT PROJECT SETUP
+Set up a React.js project with Vite for the JobTrackr frontend.
+ 
+Requirements:
+- Initialize: npm create vite@latest jobtrackr -- --template react
+- Install:
+  npm install axios react-router-dom @react-oauth/google tailwindcss
+              @hello-pangea/dnd react-hot-toast lucide-react
+ 
+- Configure Tailwind CSS
+ 
+- Create folder structure:
+  src/
+  ├── pages/   (Login, Signup, Dashboard, Jobs, MyJobs, JobDetail)
+  ├── components/ (JobCard, StatusBadge, KanbanBoard, Navbar,
+                   ProtectedRoute)
+  ├── context/    (AuthContext.jsx)
+  ├── services/   (api.js)
+  └── hooks/      (useJobs.js, useAuth.js)
+ 
+- api.js: axios instance pointing to VITE_API_URL env variable
+  with request interceptor adding Authorization: Bearer {token} header
+ 
+- AuthContext: user, token, login(), logout(), isAuthenticated
+  Store token in localStorage
+ 
+- Write .env.example: VITE_API_URL, VITE_GOOGLE_CLIENT_ID
+
+Prompt 6.2 — Login & Signup Pages
+  AUTH PAGES (Login.jsx + Signup.jsx)
+Build the Login and Signup pages in React + Tailwind CSS.
+ 
+LOGIN PAGE (/login):
+- Email + Password form
+- Google Sign In using @react-oauth/google GoogleLogin component
+- "Don't have an account? Sign up" link
+- On submit: POST /api/v1/auth/login → save token → /dashboard
+- On Google: POST /api/v1/auth/google → save token → /dashboard
+- Loading spinner during API call
+- Error toast on failure using react-hot-toast
+ 
+SIGNUP PAGE (/signup):
+- Name + Email + Password + Confirm Password
+- Google Sign Up button
+- Validation: email format, password min 8 chars, passwords match
+- On submit: POST /api/v1/auth/signup → auto login → /dashboard
+ 
+Design: Clean centered card, blue primary (#2563EB),
+smooth transitions, mobile responsive.
+
+Prompt 6.3 — Dashboard Search Page
+  DASHBOARD PAGE (Dashboard.jsx)
+Build the Dashboard page (/dashboard) in React + Tailwind.
+ 
+Requirements:
+- Protected route (redirect to /login if not authenticated)
+- Navbar: logo, "My Jobs" link, user avatar + name, logout button
+- Main search card:
+  1. Text input for job role with suggestions dropdown
+     (Software Engineer, React Developer, Data Scientist, etc.)
+  2. Dropdown for years of experience (Fresher, 1-15 years)
+  3. Large "Search Jobs" button
+  4. "🤖 Powered by Gemini AI" subtitle
+ 
+- On search: full-page loading with animated messages:
+  "Searching LinkedIn, Indeed, Glassdoor..."
+  then "🤖 AI is ranking results..."
+ 
+- On success: navigate to /jobs with results in router state
+ 
+- Show stats cards: Total Applied, In Process, Hired
+  (fetch from GET /jobs/my-jobs)
+ 
+- Mobile responsive
+
+Prompt 6.4 — Jobs Results Page
+  JOBS RESULTS PAGE (Jobs.jsx)
+Build the Jobs Results page (/jobs) in React + Tailwind.
+ 
+Requirements:
+- Receive jobs and ai_tips from router state
+  (redirect to /dashboard if empty)
+- Header: "{total} jobs found in last 24 hours for {role}"
+- AI Tips section: 3 tips from Gemini in colored cards at top
+- Filter bar: All / LinkedIn / Indeed / Glassdoor / Others
+- Sort: AI Match Score (default) / Latest / Company Name
+- Job cards grid (2 col desktop, 1 col mobile)
+ 
+Each JobCard shows:
+- Company name + role title + location + salary
+- Source badge (LinkedIn blue, Indeed purple, Glassdoor green)
+- AI match score badge:
+  green >80 / yellow >60 / red <60
+- AI reason tooltip on hover
+- Posted time ("3 hours ago")
+- "Apply Now" button (opens apply_url in new tab)
+- "Track Application" button → POST /jobs/apply/{id}
+- Bookmark icon → POST /jobs/save/{id}
+- Toast on apply/save
+ 
+- If from_cache: show "⚡ Results from cache" badge
+
+Prompt 6.5 — My Jobs Tracker Page
+  MY JOBS TRACKER PAGE (MyJobs.jsx)
+Build the My Jobs tracker (/my-jobs) in React + Tailwind.
+ 
+Requirements:
+- Tab nav: All | Applied | In Process | Rejected | Hired
+  with count badges
+ 
+- Status summary cards:
+  Applied (blue) / In Process (yellow) / Rejected (red) / Hired (green)
+ 
+TWO VIEW MODES (toggle button):
+ 
+1. LIST VIEW (default):
+   - Job cards: company, role, applied date, status
+   - Status dropdown on each card to update status via
+     PATCH /jobs/apply/{id}/status
+   - Remove button → DELETE /jobs/apply/{id}
+   - Saved jobs section below
+ 
+2. KANBAN VIEW:
+   - 4 columns: Applied | In Process | Rejected | Hired
+   - Drag & drop using @hello-pangea/dnd
+   - On drop: call PATCH /jobs/apply/{id}/status
+   - Each column: count badge + colored header
+   - Cards: role, company, applied date
+ 
+- Empty state with illustration + "Start searching" button
+- Mobile: kanban scrolls horizontally
+
+
+🚀  PHASE 7 — Deployment
+Prompt 7.1 — Environment Variables & Config
+  ENVIRONMENT VARIABLES & DEPLOYMENT CONFIG
+Create all environment and deployment config files for JobTrackr.
+ 
+1. backend/.env.example — all required variables:
+   DATABASE_URL, JWT_SECRET, JWT_EXPIRY_HOURS,
+   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
+   GEMINI_API_KEY, SERPAPI_KEY,
+   UPSTASH_REDIS_URL, FRONTEND_URL
+ 
+2. frontend/.env.example:
+   VITE_API_URL, VITE_GOOGLE_CLIENT_ID
+ 
+3. backend/render.yaml — Render.com deployment:
+   - Web service, python environment
+   - Build: pip install -r requirements.txt
+   - Start: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+   - All env vars as sync: false
+ 
+4. frontend/vercel.json:
+   - SPA routing (all routes → index.html)
+   - Build output directory
+ 
+5. Step-by-step deployment instructions:
+   - Deploy backend on Render.com (free tier)
+   - Deploy frontend on Vercel (free tier)
+   - Set environment variables on each platform
+   - Enable Google OAuth on Google Cloud Console
+
+Prompt 7.2 — Requirements & Dockerfile
+  REQUIREMENTS.TXT + DOCKERFILE
+Write requirements.txt and Dockerfile for the FastAPI backend.
+ 
+requirements.txt — include exact versions for:
+fastapi, uvicorn, asyncpg, python-jose[cryptography],
+passlib[bcrypt], httpx, google-generativeai, google-auth,
+redis, python-dotenv, pydantic, pydantic-settings, alembic
+ 
+Dockerfile:
+- Base image: python:3.11-slim
+- Working directory: /app
+- Copy and install requirements FIRST (for layer caching)
+- Copy app code
+- Expose port 8000
+- Use non-root user for security
+- CMD: uvicorn app.main:app with production settings
+
+
+🐛  PHASE 8 — Debugging Prompts
+Prompt 8.1 — CORS Fix
+  FIX CORS ERRORS
+I'm getting CORS errors when my React frontend (Vercel) calls
+my FastAPI backend (Render.com). Fix the CORS config in main.py.
+ 
+Frontend URL: https://jobtrackr.vercel.app
+Backend URL:  https://jobtrackr-api.onrender.com
+ 
+Fix requirements:
+- Allow requests from frontend URL + localhost:5173 for dev
+- Allow methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+- Allow headers: Authorization, Content-Type
+- Allow credentials: true
+- Read allowed origins from FRONTEND_URL env variable
+
+Prompt 8.2 — SerpAPI No Results Fix
+  FIX SERPAPI EMPTY RESULTS
+My SerpAPI job search is returning empty results for some queries.
+Current query: "{role} {experience} years experience jobs India"
+ 
+Fix scraper.py to:
+1. Build 3 query variations if first returns empty:
+   - "{role} jobs India"
+   - "{role} hiring India 2024"
+   - "{role} job opening Bangalore Mumbai Delhi"
+2. Run them sequentially, stop at first non-empty result
+3. If all fail, try without experience filter
+4. Log which query succeeded
+5. Write parse_posted_time(text) function that converts strings like
+   "2 days ago", "3 hours ago" to datetime objects
+   and filters out anything older than 24 hours
+
+Prompt 8.3 — Gemini JSON Parse Fix
+  FIX GEMINI JSON PARSING
+My Gemini AI responses sometimes fail JSON parsing because
+the model returns markdown code blocks or extra text.
+ 
+Fix gemini.py:
+1. Write safe_parse_json(text) function that:
+   - Tries direct json.loads() first
+   - Strips ```json and ``` markdown fences
+   - Uses regex to extract first [...] or {...} from text
+   - Returns None on complete failure
+ 
+2. Update all three functions to use safe_parse_json()
+ 
+3. Add proper fallbacks when parsing fails:
+   - rank_jobs fallback: return jobs unranked with ai_score=50
+   - get_search_tips fallback: return 3 generic tips
+   - optimize_queries fallback: return [original_role]
+
+Prompt 8.4 — Render Cold Start Fix
+  FIX RENDER FREE TIER COLD START
+My Render.com free backend spins down after 15 min of inactivity
+causing slow first load. Fix this with a keep-alive strategy.
+ 
+Requirements:
+1. Add a GET /ping endpoint that returns {pong: true}
+2. Create a frontend utility keepAlive.js that:
+   - Pings the backend every 10 minutes using setInterval
+   - Starts on app load, stops when tab is hidden (Page Visibility API)
+3. In the frontend show a "Connecting to server..." toast
+   only if the first API call takes more than 3 seconds
+   then hide it once connected
+4. Add a loading skeleton component for job cards while fetching
+
+
+🎁  BONUS PROMPTS  (Extra Features)
+Bonus 1 — Cover Letter Generator
+  COVER LETTER GENERATOR
+Add an AI Cover Letter Generator feature.
+ 
+Backend:
+- Endpoint: POST /jobs/{job_id}/cover-letter (protected)
+- Call Gemini to generate personalized cover letter based on:
+  job title, company, description, and user's name
+- Return: {cover_letter: string}
+ 
+Frontend:
+- "Generate Cover Letter" button on JobDetail page
+- Loading state while generating
+- Display in modal with:
+  - Formatted text display
+  - "Copy to Clipboard" button
+  - "Download as .txt" button
+- Add to MyJobs page as well for applied jobs
+
+Bonus 2 — Resume Upload & AI Matching
+  RESUME UPLOAD + AI MATCHING
+Add resume upload and AI-enhanced job matching.
+ 
+Backend:
+- Endpoint: POST /users/resume
+  - Accept PDF upload (max 5MB)
+  - Extract text using PyPDF2
+  - Store in users.resume_text column
+- Endpoint: GET /users/resume → return resume text
+- Update rank_jobs() in gemini.py to include resume_text in
+  the ranking prompt for better match scoring
+- New match factors: skills match, experience match, domain
+ 
+Frontend:
+- Profile page with PDF upload dropzone
+- "Resume uploaded ✓" confirmation badge
+- On job cards: "Matched with your resume" tag
+- Higher quality AI score displayed when resume is present
+
+Bonus 3 — Job Alert Email Notifications
+  JOB ALERT NOTIFICATIONS
+Add a job alert email notification system.
+ 
+Backend:
+- New table: job_alerts (id, user_id, role, experience, created_at)
+- POST /alerts → create alert for current user's search
+- GET /alerts → list user's alerts
+- DELETE /alerts/{id} → remove alert
+- Render.com Cron Job (free): runs every 6 hours
+- Cron task: for each alert, fetch fresh jobs via SerpAPI,
+  send email if new jobs found since last check
+- Use Python smtplib with Gmail SMTP (free) for email
+- Email template: "{X} new jobs found for {role} in last 24 hours"
+  with a list of top 5 job titles and apply links
+ 
+Frontend:
+- "🔔 Set Job Alert" button on Dashboard after search
+- Button changes to "✓ Alert Active" when saved
+- Manage alerts list in profile/settings page
+
+Bonus 4 — Profile & Stats Dashboard
+  USER PROFILE & STATS
+Build a user profile and job application statistics dashboard.
+ 
+Backend:
+- GET /users/stats → return:
+  {total_applied, total_saved, hired_count, rejected_count,
+   inprocess_count, top_companies: [], top_roles: [],
+   applications_by_week: [], avg_response_days: float}
+ 
+Frontend - Stats Dashboard:
+- Pie chart: Application Status Distribution
+- Line chart: Applications Over Time (last 4 weeks)
+- Top 5 companies you applied to
+- Top 5 roles you applied for
+- Success rate percentage (hired / total applied)
+- Edit profile: name, avatar upload
+- All charts using recharts library (no install needed in React)
+
+
+📋  Quick Reference — Free Tier Accounts
+Create these 7 free accounts before starting development:
+
+supabase.com → PostgreSQL database + Google OAuth + Email Auth
+serpapi.com → Google Jobs scraping (100 searches/month free)
+aistudio.google.com → Gemini API key (15 req/min free)
+upstash.com → Redis caching (10K requests/day free)
+render.com → Backend FastAPI hosting (750 hrs/month free)
+vercel.com → Frontend React hosting (unlimited free)
+console.cloud.google.com → Google OAuth 2.0 credentials
+
+
+🗓️  Development Timeline
+
+Week 1 — Phase 1 & 2: Supabase setup + FastAPI auth (Google + email)
+Week 2 — Phase 3: SerpAPI integration + Redis caching
+Week 3 — Phase 4 & 5: Gemini AI agent + all API routes
+Week 4 — Phase 6: React frontend (all 5 pages)
+Week 5 — Phase 7: Deploy Render + Vercel + end-to-end testing
+Week 6 — Bonus: Add cover letters, resume matching, email alerts
+
+💡 Pro Tip: After completing each phase, test it with Postman or the FastAPI /docs page before moving to the next phase. This saves debugging time later.
+
+
+Built with ❤️ using FastAPI • React • Gemini AI • Supabase
+All Free Tier • Personal Project Ready

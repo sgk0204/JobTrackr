@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: jobtrackr-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_EXPIRY_HOURS
+        value: 24
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: SERPAPI_KEY
+        sync: false
+      - key: UPSTASH_REDIS_URL
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
