@@ -2,8 +2,6 @@
 
 An AI-powered job search portal that scrapes job listings from multiple sources, analyzes them using Google Gemini AI, and provides a centralized dashboard for users to track their applications, save jobs, and receive personalized career tips.
 
-![JobTrackr Preview](https://via.placeholder.com/1200x600?text=JobTrackr+Dashboard)
-
 ## Features
 - **Centralized Search**: Search for jobs across platforms (LinkedIn, Indeed, Glassdoor) from a single interface.
 - **AI Ranking Engine**: Uses Gemini AI to rank job postings based on relevance to your experience and role, assigning a 0-100 score and providing a personalized rationale.
